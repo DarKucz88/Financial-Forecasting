@@ -40,42 +40,31 @@ str(test)
 # ==========================================================
 # 3. DATA CLEANING
 # ==========================================================
+#Analizujemy całą Australię. 
 
 train <- train %>%
   mutate(
-    RainToday = ifelse(RainToday == "Yes", 1, 0),
-    RainTomorrow = ifelse(RainTomorrow == "Yes", 1, 0)
+    RainToday = ifelse(tolower(trimws(RainToday)) == "yes", 1, 0)
   )
 
 test <- test %>%
   mutate(
-    RainToday = ifelse(RainToday == "Yes", 1, 0)
+    RainToday = ifelse(tolower(trimws(RainToday)) == "yes", 1, 0)
   )
 
-# Variables used in the model
 model_vars <- c(
-  "RainTomorrow",
-  "RainToday",
-  "Rainfall",
-  "Sunshine",
-  "Humidity3pm",
-  "Pressure3pm",
-  "Cloud3pm",
-  "WindGustSpeed",
-  "Temp3pm"
+  "RainTomorrow", "Location", "RainToday", "Rainfall",
+  "Sunshine", "Humidity3pm", "Pressure3pm",
+  "Cloud3pm", "WindGustSpeed", "Temp3pm"
 )
 
 test_vars <- c(
-  "RainToday",
-  "Rainfall",
-  "Sunshine",
-  "Humidity3pm",
-  "Pressure3pm",
-  "Cloud3pm",
-  "WindGustSpeed",
-  "Temp3pm"
+  "Location", "RainToday", "Rainfall", "Sunshine",
+  "Humidity3pm", "Pressure3pm", "Cloud3pm",
+  "WindGustSpeed", "Temp3pm"
 )
 
+# Clean NA
 train_clean <- train %>%
   select(all_of(model_vars)) %>%
   na.omit()
@@ -83,7 +72,6 @@ train_clean <- train %>%
 test_clean <- test %>%
   select(all_of(test_vars)) %>%
   na.omit()
-
 # Check missing values
 colSums(is.na(train_clean))
 colSums(is.na(test_clean))
@@ -100,7 +88,7 @@ prop.table(table(train_clean$RainTomorrow))
 
 # Descriptive table
 desc_stats <- train_clean %>%
-  summarise(across(everything(), list(
+  summarise(across(where(is.numeric), list(
     mean = mean,
     sd = sd,
     min = min,
@@ -113,50 +101,30 @@ kable(desc_stats)
 # 5. EXPLORATORY VISUALISATIONS
 # ==========================================================
 
-ggplot(train_clean, aes(x = factor(RainTomorrow))) +
-  geom_bar() +
-  labs(
-    title = "Distribution of Rain Tomorrow",
-    x = "Rain Tomorrow",
-    y = "Number of Observations"
-  )
+# Zapisujemy wykres do obiektu, żeby na pewno się wyświetlił
+p1 <- ggplot(train_clean, aes(x = factor(RainTomorrow))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Rain Tomorrow", x = "Rain Tomorrow", y = "Count")
+print(p1)
 
-ggplot(train_clean, aes(x = Humidity3pm, y = RainTomorrow)) +
-  geom_jitter(height = 0.05, alpha = 0.3) +
-  geom_smooth(
-    method = "glm",
-    method.args = list(family = "binomial"),
-    se = TRUE
-  ) +
-  labs(
-    title = "Humidity at 3pm and Probability of Rain Tomorrow",
-    x = "Humidity at 3pm",
-    y = "Rain Tomorrow"
-  )
+p2 <- ggplot(train_clean, aes(x = Humidity3pm, y = RainTomorrow)) +
+  geom_jitter(height = 0.05, alpha = 0.1, color="darkblue") +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color="red") +
+  labs(title = "Humidity at 3pm and Probability of Rain Tomorrow", x = "Humidity at 3pm", y = "Rain Tomorrow")
+print(p2)
 
-ggplot(train_clean, aes(x = Pressure3pm, y = RainTomorrow)) +
-  geom_jitter(height = 0.05, alpha = 0.3) +
-  geom_smooth(
-    method = "glm",
-    method.args = list(family = "binomial"),
-    se = TRUE
-  ) +
-  labs(
-    title = "Pressure at 3pm and Probability of Rain Tomorrow",
-    x = "Pressure at 3pm",
-    y = "Rain Tomorrow"
-  )
-
-# Correlation matrix
-cor_matrix <- cor(train_clean)
-round(cor_matrix, 3)
+# Wybieramy tylko kolumny numeryczne, żeby pominąć tekstowe "Location"
+cor_matrix <- train_clean %>%
+  select(where(is.numeric)) %>%
+  cor()
+print(round(cor_matrix, 3))
 
 # ==========================================================
 # 6. ECONOMETRIC CAUSE-EFFECT MODEL
 # ==========================================================
 
 logit_model <- glm(
-  RainTomorrow ~ RainToday + Rainfall + Sunshine +
+  RainTomorrow ~ Location + RainToday + Rainfall + Sunshine +
     Humidity3pm + Pressure3pm + Cloud3pm +
     WindGustSpeed + Temp3pm,
   data = train_clean,
@@ -171,7 +139,35 @@ kable(coef_table)
 
 # Odds ratios
 odds_ratios <- exp(coef(logit_model))
-kable(data.frame(Variable = names(odds_ratios), Odds_Ratio = odds_ratios))
+or_table <- data.frame(Variable = names(odds_ratios), Odds_Ratio = odds_ratios)
+
+logit_model_num <- glm(
+  RainTomorrow ~ RainToday + Rainfall + Sunshine + Humidity3pm + Pressure3pm + Cloud3pm + WindGustSpeed + Temp3pm,
+  data = train_clean, family = binomial(link = "logit")
+)
+
+# Wyciągamy współczynniki numeryczne, bez lokalizacji (dla czytelności wykresu)
+or_data <- tidy(logit_model_num, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    Impact = ifelse(estimate > 1, "Increases Rain Risk", "Decreases Rain Risk")
+  )
+
+p_odds <- ggplot(or_data, aes(x = reorder(term, estimate), y = estimate, color = Impact)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, linewidth = 1) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black") +
+  coord_flip() +
+  labs(
+    title = "Impact of Weather Variables on Rain Probability",
+    subtitle = "Odds Ratios from Logistic Regression (Values > 1 increase risk)",
+    x = "Weather Variable",
+    y = "Odds Ratio"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Increases Rain Risk" = "firebrick", "Decreases Rain Risk" = "forestgreen"))
+
+print(p_odds)
 
 # ==========================================================
 # 7. NUMERICAL MODEL VERIFICATION
@@ -189,8 +185,8 @@ pseudo_r2 <- pR2(logit_model)
 pseudo_r2
 
 # Multicollinearity
-vif_values <- vif(logit_model)
-vif_values
+vif_values <- vif(logit_model_num)
+print(vif_values)
 
 # ==========================================================
 # 8. STOCHASTIC / CLASSIFICATION VERIFICATION
@@ -200,8 +196,8 @@ train_clean$pred_prob <- predict(logit_model, type = "response")
 train_clean$pred_class <- ifelse(train_clean$pred_prob >= 0.5, 1, 0)
 
 conf_matrix <- confusionMatrix(
-  factor(train_clean$pred_class),
-  factor(train_clean$RainTomorrow),
+  factor(train_clean$pred_class, levels = c("0", "1")),
+  factor(train_clean$RainTomorrow, levels = c("0", "1")),
   positive = "1"
 )
 
@@ -209,10 +205,9 @@ conf_matrix
 
 # ROC curve and AUC
 roc_train <- roc(train_clean$RainTomorrow, train_clean$pred_prob)
-
 plot(
   roc_train,
-  main = "ROC Curve – Training Data"
+  main = "ROC Curve – Training Data", col="blue", lwd=2
 )
 
 auc_train <- auc(roc_train)
@@ -223,51 +218,74 @@ brier_train <- mean((train_clean$pred_prob - train_clean$RainTomorrow)^2)
 brier_train
 
 # ==========================================================
+# 8b. STATIONARITY TESTS 
+# ==========================================================
+# Verification on continuous time series (one city)
+train_sydney_tests <- train_clean %>% filter(Location == "Sydney")
+
+#Test ADF (H0: The series is non-stationary)
+print(adf.test(train_sydney_tests$Humidity3pm))
+
+# Test KPSS (H0: The series is stationary) 
+print(kpss.test(train_sydney_tests$Humidity3pm))
+
+p_acf <- ggtsdisplay(
+  train_sydney_tests$Humidity3pm, 
+  main = "Time Series, ACF and PACF for Humidity3pm (Sydney)",
+  theme = theme_minimal()
+)
+print(p_acf)
+
+# ==========================================================
 # 9. FORECAST EXPLANATORY VARIABLES
 # ==========================================================
 
-forecast_x <- function(series, h) {
+forecast_x <- function(series, h, var_name) {
   ts_data <- ts(series, frequency = 1)
   model <- auto.arima(ts_data)
   forecast_values <- forecast(model, h = h)
+
   
-  return(list(
-    model = model,
-    forecast = forecast_values
-  ))
+  lb_test <- Box.test(model$residuals, type = "Ljung-Box")
+  print(lb_test)
+  
+  return(as.numeric(forecast_values$mean))
 }
 
-h <- nrow(test_clean)
+h_forecast <- 7 # Generujemy prognozę (scenariusz) na następne 7 dni
 
-fc_rainfall <- forecast_x(train_clean$Rainfall, h)
-fc_sunshine <- forecast_x(train_clean$Sunshine, h)
-fc_humidity <- forecast_x(train_clean$Humidity3pm, h)
-fc_pressure <- forecast_x(train_clean$Pressure3pm, h)
-fc_cloud <- forecast_x(train_clean$Cloud3pm, h)
-fc_wind <- forecast_x(train_clean$WindGustSpeed, h)
-fc_temp <- forecast_x(train_clean$Temp3pm, h)
+#SCENARIO A: SYDNEY (Humid Climate)
+train_syd <- train_clean %>% filter(Location == "Sydney")
 
-# Show selected ARIMA models
-fc_rainfall$model
-fc_sunshine$model
-fc_humidity$model
-fc_pressure$model
-fc_cloud$model
-fc_wind$model
-fc_temp$model
+fc_syd <- data.frame(
+  Location = "Sydney",
+  RainToday = rep(tail(train_syd$RainToday, 1), h_forecast),
+  Rainfall = forecast_x(train_syd$Rainfall, h_forecast, "Syd_Rainfall"),
+  Sunshine = forecast_x(train_syd$Sunshine, h_forecast, "Syd_Sunshine"),
+  Humidity3pm = forecast_x(train_syd$Humidity3pm, h_forecast, "Syd_Hum"),
+  Pressure3pm = forecast_x(train_syd$Pressure3pm, h_forecast, "Syd_Pres"),
+  Cloud3pm = forecast_x(train_syd$Cloud3pm, h_forecast, "Syd_Cloud"),
+  WindGustSpeed = forecast_x(train_syd$WindGustSpeed, h_forecast, "Syd_Wind"),
+  Temp3pm = forecast_x(train_syd$Temp3pm, h_forecast, "Syd_Temp")
+)
 
-# Plot selected forecasts
-autoplot(fc_humidity$forecast) +
-  labs(title = "Forecast of Humidity at 3pm")
+# SCENARIO B: ALICE SPRINGS (Arid/Desert Climate)
+train_ali <- train_clean %>% filter(Location == "AliceSprings")
 
-autoplot(fc_pressure$forecast) +
-  labs(title = "Forecast of Pressure at 3pm")
+fc_ali <- data.frame(
+  Location = "AliceSprings",
+  RainToday = rep(tail(train_ali$RainToday, 1), h_forecast),
+  Rainfall = forecast_x(train_ali$Rainfall, h_forecast, "Ali_Rainfall"),
+  Sunshine = forecast_x(train_ali$Sunshine, h_forecast, "Ali_Sunshine"),
+  Humidity3pm = forecast_x(train_ali$Humidity3pm, h_forecast, "Ali_Hum"),
+  Pressure3pm = forecast_x(train_ali$Pressure3pm, h_forecast, "Ali_Pres"),
+  Cloud3pm = forecast_x(train_ali$Cloud3pm, h_forecast, "Ali_Cloud"),
+  WindGustSpeed = forecast_x(train_ali$WindGustSpeed, h_forecast, "Ali_Wind"),
+  Temp3pm = forecast_x(train_ali$Temp3pm, h_forecast, "Ali_Temp")
+)
 
-autoplot(fc_temp$forecast) +
-  labs(title = "Forecast of Temperature at 3pm")
-
-autoplot(fc_wind$forecast) +
-  labs(title = "Forecast of Wind Gust Speed")
+#We combine weather data generated from ARIMA into one "future" database
+future_x <- rbind(fc_syd, fc_ali)
 
 # ==========================================================
 # 10. CONDITIONAL EX-ANTE FORECAST
@@ -277,33 +295,16 @@ autoplot(fc_wind$forecast) +
 # - observed RainToday from test data
 # - forecasted explanatory variables from training data
 
-future_x <- data.frame(
-  RainToday = test_clean$RainToday,
-  Rainfall = as.numeric(fc_rainfall$forecast$mean),
-  Sunshine = as.numeric(fc_sunshine$forecast$mean),
-  Humidity3pm = as.numeric(fc_humidity$forecast$mean),
-  Pressure3pm = as.numeric(fc_pressure$forecast$mean),
-  Cloud3pm = as.numeric(fc_cloud$forecast$mean),
-  WindGustSpeed = as.numeric(fc_wind$forecast$mean),
-  Temp3pm = as.numeric(fc_temp$forecast$mean)
-)
 
-# Predict probability of rain tomorrow
-future_x$Forecast_Probability_RainTomorrow <- predict(
+future_x$Forecast_Probability <- predict(
   logit_model,
   newdata = future_x,
   type = "response"
 )
 
-# Classification threshold
-future_x$Forecast_Class_RainTomorrow <- ifelse(
-  future_x$Forecast_Probability_RainTomorrow >= 0.5,
-  1,
-  0
+future_x$Forecast_Class <- ifelse(
+  future_x$Forecast_Probability >= 0.5, 1, 0
 )
-
-head(future_x)
-
 # ==========================================================
 # 11. FINAL FORECAST OUTPUT
 # ==========================================================
@@ -314,9 +315,10 @@ final_forecast <- future_x %>%
       Forecast_Class_RainTomorrow == 1,
       "Rain expected",
       "No rain expected"
-    )
-  )
-
+    ), Day = rep(paste("Day", 1:h_forecast), 2)
+  ) %>%
+  select(Location, Day, Forecast_Probability, Forecast_Label, everything())
+print(final_forecast[, 1:4])
 head(final_forecast, 20)
 
 write.csv(
@@ -325,6 +327,20 @@ write.csv(
   row.names = FALSE
 )
 
+#Chart comparing predictions for Sydney and Alice Springs
+p3 <- ggplot(final_forecast, aes(x = Day, y = Forecast_Probability, group = Location, color = Location)) +
+  geom_line(linewidth = 1.5) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color="red") +
+  labs(
+    title = "Conditional Ex-Ante Forecast: Sydney vs Alice Springs",
+    subtitle = "Probability of Rain Tomorrow (7-Day Horizon)",
+    x = "Forecast Horizon",
+    y = "Probability of Rain"
+  ) +
+  theme_minimal()
+
+print(p3)
 # ==========================================================
 # 12. VISUALISE FINAL FORECAST
 # ==========================================================
@@ -348,6 +364,37 @@ ggplot(final_forecast, aes(x = Forecast_Probability_RainTomorrow)) +
     x = "Forecast Probability",
     y = "Frequency"
   )
+
+# ==========================================================
+#  Weryfikacja stochastyczna 
+# ==========================================================
+
+#TESTS FOR STATIONARITY OF VARIABLES
+
+# We perform tests for a sample variable (e.g. Humidity)
+print(tseries::adf.test(train_clean$Humidity3pm))
+
+#KPSS Test for Humidity3pm (H0: Stationarity)
+print(tseries::kpss.test(train_clean$Humidity3pm))
+
+#DIAGNOSTICS OF THE REST OF ARIMA MODELS
+
+# We collect the generated models into one list
+generated_models <- list(
+  "Rainfall"      = fc_rainfall$model,
+  "Sunshine"      = fc_sunshine$model,
+  "Humidity3pm"   = fc_humidity$model,
+  "Pressure3pm"   = fc_pressure$model,
+  "Cloud3pm"      = fc_cloud$model,
+  "WindGustSpeed" = fc_wind$model,
+  "Temp3pm"       = fc_temp$model
+)
+
+#Ljung-Box test for model residuals:
+# H0: No autocorrelation (residuals are white noise)
+  print(Box.test(generated_models[[nazwa]]$residuals, type = "Ljung-Box"))
+}
+
 
 # ==========================================================
 # 13. SUMMARY TABLE FOR REPORT
