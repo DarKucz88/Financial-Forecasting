@@ -40,7 +40,7 @@ str(test)
 # ==========================================================
 # 3. DATA CLEANING
 # ==========================================================
-#Analizujemy całą Australię. 
+#We analyze all of Australia
 
 train <- train %>%
   mutate(
@@ -101,7 +101,7 @@ kable(desc_stats)
 # 5. EXPLORATORY VISUALISATIONS
 # ==========================================================
 
-# Zapisujemy wykres do obiektu, żeby na pewno się wyświetlił
+# We save the chart to the object to make sure it is displayed
 p1 <- ggplot(train_clean, aes(x = factor(RainTomorrow))) +
   geom_bar(fill = "steelblue") +
   labs(title = "Distribution of Rain Tomorrow", x = "Rain Tomorrow", y = "Count")
@@ -113,7 +113,7 @@ p2 <- ggplot(train_clean, aes(x = Humidity3pm, y = RainTomorrow)) +
   labs(title = "Humidity at 3pm and Probability of Rain Tomorrow", x = "Humidity at 3pm", y = "Rain Tomorrow")
 print(p2)
 
-# Wybieramy tylko kolumny numeryczne, żeby pominąć tekstowe "Location"
+# We select only numeric columns to skip the text "Location"
 cor_matrix <- train_clean %>%
   select(where(is.numeric)) %>%
   cor()
@@ -146,7 +146,7 @@ logit_model_num <- glm(
   data = train_clean, family = binomial(link = "logit")
 )
 
-# Wyciągamy współczynniki numeryczne, bez lokalizacji (dla czytelności wykresu)
+# We extract numerical coefficients, without localization (for the readability of the graph)
 or_data <- tidy(logit_model_num, exponentiate = TRUE, conf.int = TRUE) %>%
   filter(term != "(Intercept)") %>%
   mutate(
@@ -366,7 +366,7 @@ ggplot(final_forecast, aes(x = Forecast_Probability_RainTomorrow)) +
   )
 
 # ==========================================================
-#  Weryfikacja stochastyczna 
+# Stochastic verification
 # ==========================================================
 
 #TESTS FOR STATIONARITY OF VARIABLES
